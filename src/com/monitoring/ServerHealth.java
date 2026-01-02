@@ -4,47 +4,48 @@ import java.util.ArrayList;
 import java.util.List;
 
 public class ServerHealth {
-    private List<LogEntry> logs = new ArrayList<>();
-    private AlertService alertService;
+    // Use a Deque for Sliding Window
+    private final java.util.Deque<LogEntry> logs = new java.util.ArrayDeque<>();
+    private final AlertService alertService;
+    private static final double ERROR_THRESHOLD = 0.1; // 10%
+    private static final int WINDOW_SECONDS = 60;
 
     public ServerHealth(AlertService alertService) {
         this.alertService = alertService;
     }
 
-    public void ingest(String logLine) {
+    public synchronized void ingest(String logLine) {
         LogParser parser = new LogParser();
         LogEntry entry = parser.parse(logLine);
         if (entry != null) {
-            logs.add(entry);
+            logs.addLast(entry);
+            pruneOldLogs(entry.getTimestamp());
             checkHealth();
         }
     }
 
-    private void checkHealth() {
-        int errorCount = 0;
-        for (LogEntry log : logs) {
-            if ("ERROR".equals(log.getLevel())) {
-                errorCount++;
-            }
+    private void pruneOldLogs(java.time.LocalDateTime currentTimestamp) {
+        java.time.LocalDateTime threshold = currentTimestamp.minusSeconds(WINDOW_SECONDS);
+        while (!logs.isEmpty() && logs.peekFirst().getTimestamp().isBefore(threshold)) {
+            logs.removeFirst();
         }
+    }
 
-        if (logs.isEmpty()) return;
-
-        double errorRate = errorCount / logs.size();
+    private void checkHealth() {
+        double errorRate = getErrorRate();
         
-        if (errorRate > 0.1) { // 10%
-             alertService.triggerAlert("Error rate too high: " + errorRate);
+        if (errorRate > ERROR_THRESHOLD) {
+             alertService.triggerAlert("Error rate too high: " + String.format("%.2f", errorRate));
         }
     }
     
-    public double getErrorRate() {
-        int errorCount = 0;
-        for (LogEntry log : logs) {
-            if ("ERROR".equals(log.getLevel())) {
-                errorCount++;
-            }
-        }
-        // BUG: Integer division
-        return logs.isEmpty() ? 0 : errorCount / logs.size();
+    public synchronized double getErrorRate() {
+        if (logs.isEmpty()) return 0.0;
+        
+        long errorCount = logs.stream()
+                .filter(log -> "ERROR".equals(log.getLevel()))
+                .count();
+        
+        return (double) errorCount / logs.size();
     }
 }
