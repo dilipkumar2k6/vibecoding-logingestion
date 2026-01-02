@@ -2,7 +2,7 @@ package com.monitoring;
 
 public class Main {
     public static void main(String[] args) {
-        AlertService alertService = message -> System.out.println("ALERT: " + message);
+        AlertService alertService = new ConsoleAlertService();
         ServerHealth health = new ServerHealth(alertService);
 
         // Simulate some logs
